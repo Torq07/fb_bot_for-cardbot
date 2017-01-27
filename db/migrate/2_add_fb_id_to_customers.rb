@@ -4,6 +4,6 @@ class AddFbIdToCustomers < ActiveRecord::Migration
   end
 
   def self.down
-    remove_column :comments, :post_id
+    remove_column :customers, :fb_id
   end
 end

@@ -13,7 +13,6 @@ class CreateAgentsEtc < ActiveRecord::Migration
     create_table :customers do |t|
       t.string :first_name
       t.string :last_name
-      t.integer :activation_code
     end	
 
     create_table :card_products, force: true do |t|
