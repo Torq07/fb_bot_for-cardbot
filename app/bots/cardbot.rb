@@ -1,4 +1,5 @@
 require 'json'
+require "#{Rails.root}/lib/assets/twillo"
 include Facebook::Messenger
 
 class CardBot
@@ -8,6 +9,7 @@ class CardBot
   def initialize(sender, payload)
     @sender = sender
     @payload = payload
+    @url = 'https://1fff979d.ngrok.io'
   end
 
   def check_code(code)
@@ -44,7 +46,7 @@ class CardBot
             elements: [
               {
                 "title":"Owner: #{user.first_name.capitalize} #{user.last_name.capitalize}",
-                "image_url":"https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTQ2MSw4c0fEkLZaDAwt4qdbxWEAKG0lv9JyqXj4pSWw0_KXLZbyQ",
+                "image_url": "#{@url}/card_icon.png",
                 "subtitle":"Card balance: #{card.balance} \n Expiration date: #{card.expiring_date}",
                 "buttons":[
                   {
@@ -78,21 +80,101 @@ class CardBot
       )
   end
 
-  def request_activation_code
-    text = 'Hello, you need to activate your account with '+
-           'your activation code received from seller. '+
-           'Please enter: "Code: {Your activation code}"'
+  def request_activation_code(user_id)
+    text = "Hello, you need to activate your account with "+
+           "your activation code received from seller.\n\n"+
+           "Please enter: \"Code: {Your activation code}\n\n"+
+           "\tor\t"
+    buttons = [{
+        type: 'postback',
+        title: "Sign up",
+        payload: {
+          id: 'sign_up',
+          user_id: user_id
+        }.to_json
+      }]
+
+
     Bot.deliver(
       recipient: sender,
       message: {
-        text: text
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'button',
+            text: text,
+            buttons: buttons
+          }
+        }
       }
     )
   end
 
+  def sign_up
+    user = Customer.create(id:payload['user_id'], fb_id:payload['user_id'])
+    Bot.deliver(
+        recipient: sender,
+        message: {
+          text: 'Please enter name in format "Name: {Your name}"'
+        }
+      )
+  end
+
+  def save_name(name,user)
+    user.update_attribute(:first_name,name)
+    Bot.deliver(
+        recipient: sender,
+        message: {
+          text: 'Please enter lastname like this: "Lastname: {Your lastname}"'
+        }
+      )
+  end
+
+  def save_lastname(lastname,user)
+    user.update_attribute(:last_name,lastname)
+    Bot.deliver(
+        recipient: sender,
+        message: {
+          text: 'Please enter phone like this:"Phone: {Your phone in international format}'
+        }
+      )
+  end
+
+  def save_phone(phone,user)
+    user_exists = Customer.exists?(phone)
+    activation_code = 1000+rand(9000)
+    if user_exists && user
+      existed_user = Customer.find(phone)
+      existed_user.update_attributes(
+                                     first_name: user.first_name, 
+                                     last_name: user.last_name,
+                                     activation_code: activation_code
+                                    )
+      user.destroy
+    elsif user
+      user.update_attributes(activation_code:activation_code, id:phone)
+    end 
+
+    send = Twillo.send("+#{phone}","Activation code: #{activation_code}\n"+
+                                "This is activation code for our facebook bot")
+
+    text = if send
+      'Thank you, your code will come shortly'
+    else
+      'Sorry something goes wrong'
+    end  
+
+    Bot.deliver(
+        recipient: sender,
+        message: {
+          text: text
+        }
+      )
+  end
+
   def show_cards(user_id)
     user = Customer.find(user_id)
-    buttons = user.cards.order(:id).map do |card|
+    buttons = user.cards.where.not(status:'expired').order(:id).map do |card|
       {
         type: 'postback',
         title: "#{card.id} #{card.status}",
@@ -200,11 +282,25 @@ end
 
 Bot.on :message do |message|
   user = Customer.find_by(fb_id:message.sender['id'])
-  message.text[/code:?\s*(\d+)/i]
   bot = CardBot.new(message.sender, message.text)
-  code = $1
+  case message.text
+  when /\bcode\b:?\s*(\d+)/i
+    code = $1
+  when /\bname\b:?\s*(\D+)/i
+    name = $1
+  when /\blastname\b:?\s*(\D+)/i
+    lastname = $1
+  when /\bphone\b:?\s*\+?\s*(\d+)/i
+    phone = $1
+  end  
   if code
     bot.check_code(code)
+  elsif name
+    bot.save_name(name,user)
+  elsif lastname
+    bot.save_lastname(lastname,user)
+  elsif phone
+    bot.save_phone(phone,user)
   elsif user 
     puts "Sender ID: #{message.sender['id']}"
     sender = get_sender_profile(message.sender)
@@ -213,7 +309,7 @@ Bot.on :message do |message|
     puts "*************************"
     bot.show_cards(user.id)
   else  
-    bot.request_activation_code
+    bot.request_activation_code(message.sender['id'])
   end  
 end
 

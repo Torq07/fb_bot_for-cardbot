@@ -11,7 +11,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 1) do
+ActiveRecord::Schema.define(version: 3) do
 
   create_table "agents", force: :cascade, options: "ENGINE=InnoDB DEFAULT CHARSET=utf8" do |t|
     t.integer "aid"
@@ -52,10 +52,10 @@ ActiveRecord::Schema.define(version: 1) do
   end
 
   create_table "customers", id: :bigint, default: nil, force: :cascade, options: "ENGINE=InnoDB DEFAULT CHARSET=utf8" do |t|
-    t.string  "first_name"
-    t.string  "last_name"
-    t.integer "activation_code"
-    t.bigint  "fb_id"
+    t.string "first_name"
+    t.string "last_name"
+    t.bigint "fb_id"
+    t.bigint "activation_code"
   end
 
   create_table "stores", id: :bigint, default: nil, force: :cascade, options: "ENGINE=InnoDB DEFAULT CHARSET=utf8" do |t|
