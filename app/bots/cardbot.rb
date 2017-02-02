@@ -9,25 +9,32 @@ class CardBot
   def initialize(sender, payload)
     @sender = sender
     @payload = payload
-    @url = 'https://1fff979d.ngrok.io'
+    @url = 'https://b392afe7.ngrok.io'
+    @bot_page = 'torqBotDeveloping'
   end
 
   def check_code(code)
      user = Customer.find_by(activation_code:code)
     if user
       user.update_attribute(:fb_id, sender['id'])
-      Bot.deliver(
+      Bot.deliver({
+        
         recipient: sender,
         message: {
           text: 'Thank you. Your code accepted and now you can use out FB bot'
         }
+      },
+      access_token: ENV['ACCESS_TOKEN']
       )
     else
       Bot.deliver(
-        recipient: sender,
-        message: {
-          text: 'Sorry we didn\'t find user with provided activation code'
-        }
+        {
+          recipient: sender,
+          message: {
+            text: 'Sorry we didn\'t find user with provided activation code'
+          }
+        },
+        access_token: ENV['ACCESS_TOKEN']
       )
     end  
     
@@ -36,7 +43,7 @@ class CardBot
   def details
     card = Card.find(payload['card_id'])
     user = Customer.find(payload['user_id'])   
-    Bot.deliver(
+    Bot.deliver({
       recipient: sender,
       message: {
         attachment: {
@@ -68,15 +75,19 @@ class CardBot
           }
         }
       }
+      },
+        access_token: ENV['ACCESS_TOKEN']
     )
   end
 
   def end_chat
-      Bot.deliver(
+      Bot.deliver({
         recipient: sender,
         message: {
           text: 'Bye! see you another time'
         }
+       },
+        access_token: ENV['ACCESS_TOKEN'] 
       )
   end
 
@@ -95,7 +106,7 @@ class CardBot
       }]
 
 
-    Bot.deliver(
+    Bot.deliver({
       recipient: sender,
       message: {
         attachment: {
@@ -107,36 +118,25 @@ class CardBot
           }
         }
       }
+      },
+        access_token: ENV['ACCESS_TOKEN']
     )
   end
 
   def sign_up
-    user = Customer.create(id:payload['user_id'], fb_id:payload['user_id'])
-    Bot.deliver(
-        recipient: sender,
-        message: {
-          text: 'Please enter name in format "Name: {Your name}"'
-        }
-      )
-  end
-
-  def save_name(name,user)
-    user.update_attribute(:first_name,name)
-    Bot.deliver(
-        recipient: sender,
-        message: {
-          text: 'Please enter lastname like this: "Lastname: {Your lastname}"'
-        }
-      )
-  end
-
-  def save_lastname(lastname,user)
-    user.update_attribute(:last_name,lastname)
-    Bot.deliver(
-        recipient: sender,
-        message: {
-          text: 'Please enter phone like this:"Phone: {Your phone in international format}'
-        }
+    sender_profile = get_sender_profile(sender)
+    user = Customer.create(id:payload['user_id'],
+                           fb_id:payload['user_id'],
+                           first_name:sender_profile['first_name'],
+                           last_name:sender_profile['last_name'])
+     Bot.deliver(
+        {
+          recipient: sender,
+          message: {
+            text: 'Please enter phone like this:"Phone: {Your phone in international format}'
+          }
+        },
+        access_token: ENV['ACCESS_TOKEN'] 
       )
   end
 
@@ -155,8 +155,8 @@ class CardBot
       user.update_attributes(activation_code:activation_code, id:phone)
     end 
 
-    send = Twillo.send("+#{phone}","Activation code: #{activation_code}\n"+
-                                "This is activation code for our facebook bot")
+    send = Twillo.send("+#{phone}","For activation please follow this link:\n"+
+                                "http://m.me/#{@bot_page}?ref=#{activation_code}")
 
     text = if send
       'Thank you, your code will come shortly'
@@ -165,10 +165,28 @@ class CardBot
     end  
 
     Bot.deliver(
+        {
+          recipient: sender,
+          message: {
+            text: text
+          }
+        },
+        access_token: ENV['ACCESS_TOKEN']  
+      )
+  end
+
+  def phone_verification
+    text = "Sorry we didn\'t received your phone.\n"+
+           "Please be sure that you enter phone in correct format like this:\n"+
+           "'Phone: {Your phone in international format}'"
+    Bot.deliver(
+      {
         recipient: sender,
         message: {
           text: text
         }
+      },
+      access_token: ENV['ACCESS_TOKEN']
       )
   end
 
@@ -189,25 +207,31 @@ class CardBot
       text = 'Here is your card'
       text+='s' if buttons.count>1
       Bot.deliver(
-        recipient: sender,
-        message: {
-          attachment: {
-            type: 'template',
-            payload: {
-              template_type: 'button',
-              text: text,
-              buttons: buttons
+        {
+          recipient: sender,
+          message: {
+            attachment: {
+              type: 'template',
+              payload: {
+                template_type: 'button',
+                text: text,
+                buttons: buttons
+              }
             }
           }
-        }
+        },
+        access_token: ENV['ACCESS_TOKEN']
       )
     else
       text = 'Sorry you don\'t have any cards assigned for your account'
       Bot.deliver(
-        recipient: sender,
-        message: {
-          text: text
-        }
+        {
+          recipient: sender,
+          message: {
+            text: text
+          }
+        },
+        access_token: ENV['ACCESS_TOKEN'] 
       )
     end 
   end
@@ -280,37 +304,34 @@ rescue StandardError
   return false
 end
 
+Bot.on :referral do |referral|
+  bot = CardBot.new(referral.sender, referral.ref)
+  bot.check_code(referral.ref.to_i)
+end
+
 Bot.on :message do |message|
   user = Customer.find_by(fb_id:message.sender['id'])
   bot = CardBot.new(message.sender, message.text)
   case message.text
-  when /\bcode\b:?\s*(\d+)/i
-    code = $1
-  when /\bname\b:?\s*(\D+)/i
-    name = $1
-  when /\blastname\b:?\s*(\D+)/i
-    lastname = $1
   when /\bphone\b:?\s*\+?\s*(\d+)/i
     phone = $1
   end  
-  if code
-    bot.check_code(code)
-  elsif name
-    bot.save_name(name,user)
-  elsif lastname
-    bot.save_lastname(lastname,user)
-  elsif phone
+  
+  if phone
     bot.save_phone(phone,user)
-  elsif user 
+  elsif user && user.activation_code
     puts "Sender ID: #{message.sender['id']}"
     sender = get_sender_profile(message.sender)
     puts "*************************"
     puts sender.inspect
     puts "*************************"
     bot.show_cards(user.id)
+  elsif user 
+    bot.phone_verification
   else  
     bot.request_activation_code(message.sender['id'])
-  end  
+  end
+
 end
 
 Bot.on :postback do |postback|
@@ -330,3 +351,5 @@ Bot.on :postback do |postback|
     bot.send(parsed_payload)
   end
 end
+
+
